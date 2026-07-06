@@ -7,7 +7,7 @@ import pandas as pd
 import sqlite3
 import json
 import os
-
+from datetime import date
 
 # ─── 1. 파일 경로 설정 ─────────────────────────────
 
@@ -208,27 +208,80 @@ def convert_to_rag_documents(df: pd.DataFrame) -> list:
 
     documents = []
 
+    # 최초 저장일: 오늘 날짜를 문자열로 저장
+    # ChromaDB metadata 값 타입은 str만 허용하므로 YYYY-MM-DD 형태 문자열 사용
+    first_saved_date = date.today().isoformat()
+
     for _, row in df.iterrows():
+
+        # 기존 값 안전하게 문자열로 변환
+        existing_id = str(row.get("id", ""))
+        company = str(row.get("company", ""))
+        title = str(row.get("title", ""))
+        job_type = str(row.get("job_type", ""))
+        deadline = str(row.get("deadline", ""))
+        source = "jobs.csv"
+
+        required_skills = str(row.get("required_skills", "정보 없음"))
+        preferred_skills = str(row.get("preferred_skills", "없음"))
+        description = str(row.get("description", "정보 없음"))
+
+        # deadline_month 생성
+        # 예: "2026-09-15" → "09"
+        # 예: "26.09.10" → "09"
+        # 예: "" → ""
+        deadline_month = ""
+
+        if deadline and deadline.lower() != "nan":
+            if "-" in deadline:
+                parts = deadline.split("-")
+                if len(parts) >= 2:
+                    deadline_month = parts[1].zfill(2)
+
+            elif "." in deadline:
+                parts = deadline.split(".")
+                if len(parts) >= 2:
+                    deadline_month = parts[1].zfill(2)
+
+        # is_startup 생성
+        # 회사명 또는 직무유형에 "스타트업"이 들어가면 true
+        # ChromaDB metadata는 str만 허용하므로 "true" / "false" 문자열로 저장
+        if "스타트업" in company or "스타트업" in job_type:
+            is_startup = "true"
+        else:
+            is_startup = "false"
+
+        # 자연어 문서 텍스트 생성
         doc_text = (
-            f"{row.get('company', '')}에서 {row.get('title', '')}를 채용합니다. "
-            f"필수 스킬은 {row.get('required_skills', '정보 없음')}입니다. "
-            f"우대 스킬: {row.get('preferred_skills', '없음')}. "
-            f"업무 내용: {row.get('description', '정보 없음')}"
+            f"{company}에서 {title}를 채용합니다. "
+            f"필수 스킬은 {required_skills}입니다. "
+            f"우대 스킬: {preferred_skills}. "
+            f"업무 내용: {description}"
         )
 
+        # metadata: 검색 결과를 필터링하거나 출처를 표시할 때 사용합니다
+        
+        deadline = str(row.get("deadline", ""))
+        company = str(row.get("company", ""))
+
         metadata = {
-            "id": str(row.get("id", "")),
-            "company": str(row.get("company", "")),
-            "title": str(row.get("title", "")),
-            "job_type": str(row.get("job_type", "")),
-            "deadline": str(row.get("deadline", "")),
-            "source": "jobs.csv"
-        }
+    "id": str(row.get("id", "")),
+    "company": company,
+    "title": str(row.get("title", "")),
+    "job_type": str(row.get("job_type", "")),
+    "deadline": deadline,
+    "source": "jobs.csv",
+
+    # 새로 추가한 metadata 3개
+    "deadline_month": deadline[5:7] if len(deadline) >= 7 and deadline[4] == "-" else "",
+    "is_startup": "true" if "스타트업" in company else "false",
+    "first_saved_date": "2026-07-06"
+}
 
         documents.append({
             "text": doc_text,
             "metadata": metadata,
-            "doc_id": f"job_{row.get('id', '')}"
+            "doc_id": f"job_{existing_id}"
         })
 
     print(f"   ✅ {len(documents)}개 문서 변환 완료")
