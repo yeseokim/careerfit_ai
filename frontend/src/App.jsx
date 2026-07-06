@@ -1,27 +1,54 @@
-// frontend/src/App.jsx
-
 import { useState } from "react";
 import InputForm from "./components/InputForm";
 import ResultCard from "./components/ResultCard";
 import SourceCard from "./components/SourceCard";
 
 const API_BASE = "http://localhost:8000";
-// ⚠️ API Key는 절대 여기에 넣지 않습니다
 
 function App() {
   const [result, setResult] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  function parseSseBlock(block) {
+    const lines = block.split("\n");
+
+    const eventLine = lines.find((line) => line.startsWith("event:"));
+    const dataLine = lines.find((line) => line.startsWith("data:"));
+
+    if (!eventLine || !dataLine) {
+      return null;
+    }
+
+    const eventName = eventLine.replace("event:", "").trim();
+    const dataText = dataLine.replace("data:", "").trim();
+
+    try {
+      return {
+        eventName,
+        data: JSON.parse(dataText),
+      };
+    } catch {
+      return null;
+    }
+  }
+
   async function handleAnalyze(formData) {
     setIsLoading(true);
     setError(null);
-    setResult(null);
+    setResult({
+      answer: "",
+      sources: [],
+    });
+
+    let streamedAnswer = "";
 
     try {
-      const response = await fetch(`${API_BASE}/analyze`, {
+      const response = await fetch(`${API_BASE}/analyze/stream`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           major: formData.major,
           skills: formData.skills,
@@ -33,8 +60,61 @@ function App() {
         throw new Error(`서버 오류: ${response.status}`);
       }
 
-      const data = await response.json();
-      setResult(data);
+      if (!response.body) {
+        throw new Error("브라우저가 스트리밍 응답을 지원하지 않습니다.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+
+        const blocks = buffer.split("\n\n");
+        buffer = blocks.pop() || "";
+
+        for (const block of blocks) {
+          const parsed = parseSseBlock(block);
+
+          if (!parsed) {
+            continue;
+          }
+
+          const { eventName, data } = parsed;
+
+          if (eventName === "sources") {
+            setResult((prev) => ({
+              ...prev,
+              sources: data.sources || [],
+            }));
+          }
+
+          if (eventName === "token") {
+            streamedAnswer += data.text || "";
+
+            setResult((prev) => ({
+              ...prev,
+              answer: streamedAnswer,
+            }));
+          }
+
+          if (eventName === "error") {
+            throw new Error(data.message || "스트리밍 중 오류가 발생했습니다.");
+          }
+
+          if (eventName === "done") {
+            setIsLoading(false);
+          }
+        }
+      }
     } catch (err) {
       if (err.message.includes("Failed to fetch")) {
         setError("FastAPI 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요.");
@@ -49,13 +129,19 @@ function App() {
   return (
     <div className="min-h-screen bg-slate-50 py-10 px-4">
       <div className="max-w-2xl mx-auto">
-        <h1 className="text-2xl font-bold text-slate-800 mb-2">
-          CareerFit AI
-        </h1>
+        <header className="mb-8">
+          <p className="text-sm font-medium text-blue-500 mb-1">
+            Portfolio Coach
+          </p>
 
-        <p className="text-slate-500 text-sm mb-8">
-          취업·공모전 데이터 기반 맞춤형 AI 포트폴리오 코치
-        </p>
+          <h1 className="text-2xl font-bold text-slate-800">
+            CareerFit AI
+          </h1>
+
+          <p className="text-slate-500 text-sm mt-2">
+            취업·공모전 데이터 기반 맞춤형 AI 포트폴리오 코치
+          </p>
+        </header>
 
         <InputForm onSubmit={handleAnalyze} isLoading={isLoading} />
 
@@ -66,8 +152,8 @@ function App() {
         )}
 
         {isLoading && (
-          <div className="mt-8 text-center text-slate-500">
-            분석 중입니다...
+          <div className="mt-6 text-center text-slate-500 text-sm">
+            AI가 답변을 생성하는 중입니다...
           </div>
         )}
 
