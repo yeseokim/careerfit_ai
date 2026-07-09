@@ -1,9 +1,8 @@
+import { apiUrl } from "./lib/api";
 import { useState } from "react";
 import InputForm from "./components/InputForm";
 import ResultCard from "./components/ResultCard";
 import SourceCard from "./components/SourceCard";
-
-const API_BASE = "http://localhost:8000";
 
 function App() {
   const [result, setResult] = useState(null);
@@ -44,7 +43,7 @@ function App() {
     let streamedAnswer = "";
 
     try {
-      const response = await fetch(`${API_BASE}/analyze/stream`, {
+      const response = await fetch(apiUrl("/analyze/stream"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
